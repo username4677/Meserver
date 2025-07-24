@@ -1,0 +1,367 @@
+(function () {
+    'use strict';
+
+    // عناصر الواجهة
+    const button = document.createElement('button');
+    button.innerText = 'update';
+    Object.assign(button.style, {
+        position: 'fixed', top: '10px', right: '10px', zIndex: 9999,
+        padding: '10px 20px', backgroundColor: '#007bff', color: 'white',
+        border: 'none', borderRadius: '5px', cursor: 'pointer'
+    });
+
+    const autoToggle = document.createElement('div');
+    autoToggle.innerHTML = `
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="checkbox" id="autoBookToggle" style="accent-color: #0ff;">
+            <span>auto</span>
+        </label>
+    `;
+    Object.assign(autoToggle.style, {
+        position: 'fixed', top: '10px', right: '160px', zIndex: 9999,
+        backgroundColor: '#fff', padding: '6px 12px', borderRadius: '6px',
+        border: '1px solid #ccc', fontFamily: 'Arial'
+    });
+
+    const calendarContainer = document.createElement('div');
+    Object.assign(calendarContainer.style, {
+        position: 'fixed', top: '60px', right: '10px', width: '350px',
+        backgroundColor: '#fff', border: '1px solid #ccc', borderRadius: '10px',
+        padding: '15px', fontFamily: 'Arial', zIndex: 9999,
+        boxShadow: '0 0 10px rgba(0,0,0,0.2)', textAlign: 'center',
+        maxHeight: '90vh', overflowY: 'auto'
+    });
+
+    const slotContainer = document.createElement('div');
+    Object.assign(slotContainer.style, {
+        position: 'fixed', top: '60px', right: '370px', width: '250px',
+        backgroundColor: '#fff', border: '1px solid #ccc', borderRadius: '10px',
+        padding: '15px', fontFamily: 'Arial', zIndex: 9999,
+        boxShadow: '0 0 10px rgba(0,0,0,0.2)', maxHeight: '400px', overflowY: 'auto'
+    });
+
+    const servizioInput = document.createElement('input');
+    Object.assign(servizioInput, {
+        type: 'text', placeholder: 'رقم الخدمة (_Servizio)', value: '3500'
+    });
+    Object.assign(servizioInput.style, {
+        marginBottom: '5px', width: '100%', padding: '8px',
+        border: '1px solid #ccc', borderRadius: '5px'
+    });
+
+    const dateInput = document.createElement('input');
+    Object.assign(dateInput, {
+        type: 'text', placeholder: 'التاريخ (dd/mm/yyyy)', value: '01/07/2025'
+    });
+    Object.assign(dateInput.style, {
+        marginBottom: '5px', width: '100%', padding: '8px',
+        border: '1px solid #ccc', borderRadius: '5px'
+    });
+
+    const otpInput = document.createElement('input');
+    Object.assign(otpInput, {
+        type: 'text', placeholder: 'رمز OTP'
+    });
+    Object.assign(otpInput.style, {
+        marginBottom: '10px', width: '100%', padding: '8px',
+        border: '1px solid #ccc', borderRadius: '5px'
+    });
+
+    document.body.appendChild(button);
+    document.body.appendChild(autoToggle);
+    document.body.appendChild(calendarContainer);
+    document.body.appendChild(slotContainer);
+    calendarContainer.appendChild(servizioInput);
+    calendarContainer.appendChild(dateInput);
+    calendarContainer.appendChild(otpInput);
+
+    const autoToggleCheckbox = document.getElementById('autoBookToggle');
+    autoToggleCheckbox.checked = localStorage.getItem('autoBookEnabled') === 'true';
+    autoToggleCheckbox.addEventListener('change', () => {
+        localStorage.setItem('autoBookEnabled', autoToggleCheckbox.checked);
+        if (autoToggleCheckbox.checked) autoSearchAndBook();
+    });
+
+    const daysOfWeek = ['lu', 'ma', 'me', 'gi', 've', 'sa', 'do'];
+    const monthNames = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'];
+
+    let currentYear = 2025;
+    let currentMonth = 6;
+
+    function parseDateToDay(dateStr) {
+        const [day, month, year] = dateStr.split(' ')[0].split('/');
+        return new Date(`${year}-${month}-${day}`);
+    }
+
+    function updateDateInput(year, month) {
+        const day = '01';
+        const mm = String(month + 1).padStart(2, '0');
+        dateInput.value = `${day}/${mm}/${year}`;
+    }
+
+    function fetchMonthCalendar(year, month) {
+        return new Promise((resolve, reject) => {
+            updateDateInput(year, month);
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', 'https://prenotami.esteri.it/BookingCalendar/RetrieveCalendarAvailability', true);
+            xhr.setRequestHeader('Content-Type', 'application/json');
+            xhr.onload = () => {
+                if (xhr.status === 200) {
+                    try {
+                        const parsed = JSON.parse(xhr.responseText);
+                        const data = typeof parsed === 'string' ? JSON.parse(parsed) : parsed;
+                        resolve(data);
+                    } catch (e) {
+                        reject(e);
+                    }
+                } else reject(xhr.statusText);
+            };
+            xhr.onerror = () => reject("Network error");
+            xhr.send(JSON.stringify({
+                "_Servizio": servizioInput.value.trim(),
+                "selectedDay": dateInput.value.trim()
+            }));
+        });
+    }
+
+    function autoSearchAndBook() {
+        if (!autoToggleCheckbox.checked) return;
+
+        const servizioValue = servizioInput.value.trim();
+        let month = currentMonth;
+        let year = currentYear;
+        let monthsChecked = 0;
+
+        function tryMonth(y, m) {
+            if (monthsChecked >= 3) {
+                alert("❌ لم يتم العثور على مواعيد خلال الأشهر الثلاثة القادمة.");
+                return;
+            }
+
+            fetchMonthCalendar(y, m).then(days => {
+                const available = days.find(d => d.SlotLiberi > 0);
+                if (available) {
+                    const date = parseDateToDay(available.DateLibere);
+                    const dateISO = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                    requestTimeSlots(dateISO, servizioValue, true);
+                } else {
+                    monthsChecked++;
+                    m++;
+                    if (m > 11) { m = 0; y++; }
+                    tryMonth(y, m);
+                }
+            }).catch(() => {
+                monthsChecked++;
+                m++;
+                if (m > 11) { m = 0; y++; }
+                tryMonth(y, m);
+            });
+        }
+
+        tryMonth(year, month);
+    }
+
+    function requestTimeSlots(dateISO, idService, autoMode = false) {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', 'https://prenotami.esteri.it/BookingCalendar/RetrieveTimeSlots', true);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.onload = function () {
+            if (xhr.status === 200) {
+                try {
+                    const parsed = JSON.parse(xhr.responseText);
+                    const data = typeof parsed === 'string' ? JSON.parse(parsed) : parsed;
+                    if (autoMode) {
+                        const slot = data.find(s => s.SlotLiberi > 0);
+                        if (!slot) return;
+
+                        const prePayload = new FormData();
+                        prePayload.append('ServizioDescrizione', 'DICHIARAZIONI DI VALORE---');
+                        prePayload.append('MessaggioRassicuranteWaitingList', 'True');
+                        prePayload.append('isWaitingListEnabled', 'False');
+                        prePayload.append('IDServizioConsolare', '9');
+                        prePayload.append('IDServizioErogato', '3500');
+                        prePayload.append('IdTipoPrenotazione', '1');
+                        prePayload.append('NumMaxAccompagnatori', '0');
+                        prePayload.append('NumAccompagnatoriSelected', '0');
+                        prePayload.append('BookingNotes', '');
+                        prePayload.append('otp-input', otpInput.value.trim());
+                        prePayload.append('PrivacyCheck', 'true');
+                        prePayload.append('g-recaptcha-response', '');
+
+                        const preReq = new XMLHttpRequest();
+                        preReq.open('POST', 'https://prenotami.esteri.it/Services/Booking/3500', true);
+                        preReq.onload = function () {
+                            const payload = new FormData();
+                            payload.append('idCalendarioGiornaliero', slot.IDCalendarioServizioGiornaliero);
+                            payload.append('selectedDay', dateISO);
+                            payload.append('selectedHour', `${slot.OrarioInizioFascia.Hours}:${slot.OrarioInizioFascia.Minutes} - ${slot.OrarioFineFascia.Hours}:${slot.OrarioFineFascia.Minutes}(${slot.SlotLiberi})`);
+
+                            const xhr2 = new XMLHttpRequest();
+                            xhr2.open('POST', 'https://prenotami.esteri.it/BookingCalendar/InsertNewBooking', true);
+                            xhr2.onload = () => {
+                                try {
+                                    const res = JSON.parse(xhr2.responseText);
+                                    if (res.result === "RedirectWithNoMessage") {
+                                        const id = res.url.match(/\/ReservationDetail\/Index\/(\d+)/)?.[1];
+                                        if (id) alert(`✅ تم الحجز تلقائيًا بنجاح. رقم الحجز: ${id}`);
+                                    }
+                                } catch {}
+                            };
+                            xhr2.send(payload);
+                        };
+                        preReq.send(prePayload);
+                    } else {
+                        renderTimeSlots(data, dateISO);
+                    }
+                } catch {}
+            }
+        };
+        xhr.send(JSON.stringify({ selectedDay: dateISO, idService }));
+    }
+
+    function renderTimeSlots(slots, selectedDay) {
+        slotContainer.innerHTML = `<h3 style="margin-top:0;">${selectedDay}</h3>`;
+        slots.forEach(slot => {
+            const start = `${String(slot.OrarioInizioFascia.Hours).padStart(2, '0')}:${String(slot.OrarioInizioFascia.Minutes).padStart(2, '0')}`;
+            const end = `${String(slot.OrarioFineFascia.Hours).padStart(2, '0')}:${String(slot.OrarioFineFascia.Minutes).padStart(2, '0')}`;
+            const color = slot.SlotLiberi > 0 ? 'green' : 'red';
+            const selectedHour = `${start} - ${end}(${slot.SlotLiberi})`;
+
+            const wrapper = document.createElement('div');
+            wrapper.innerHTML = `
+                <div style="color:${color}; margin-bottom:8px; cursor: ${slot.SlotLiberi > 0 ? 'pointer' : 'default'};">
+                    ● ${start} - ${end}<br>
+                    <span style="font-size:12px;">(${slot.SlotLiberi})</span>
+                </div>
+            `;
+
+            if (slot.SlotLiberi > 0) {
+                wrapper.onclick = () => {
+                    const payload = new FormData();
+                    payload.append('idCalendarioGiornaliero', slot.IDCalendarioServizioGiornaliero);
+                    payload.append('selectedDay', selectedDay);
+                    payload.append('selectedHour', selectedHour);
+
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('POST', 'https://prenotami.esteri.it/BookingCalendar/InsertNewBooking', true);
+                    xhr.onload = function () {
+                        try {
+                            const res = JSON.parse(xhr.responseText);
+                            if (res.result === "RedirectWithNoMessage") {
+                                const id = res.url.match(/\/ReservationDetail\/Index\/(\d+)/)?.[1];
+                                if (id) alert(`✅ تم الحجز بنجاح. رقم الحجز: ${id}`);
+                            }
+                        } catch {}
+                    };
+                    xhr.send(payload);
+                };
+            }
+
+            slotContainer.appendChild(wrapper);
+        });
+    }
+
+    function renderThreeMonthCalendars(startYear, startMonth) {
+        calendarContainer.querySelectorAll('[data-dynamic]').forEach(el => el.remove());
+
+        const calendarWrapper = document.createElement('div');
+        calendarWrapper.setAttribute('data-dynamic', 'true');
+        Object.assign(calendarWrapper.style, {
+            display: 'flex', flexDirection: 'column', gap: '20px'
+        });
+
+        for (let i = 0; i < 3; i++) {
+            const year = startMonth + i > 11 ? startYear + 1 : startYear;
+            const month = (startMonth + i) % 12;
+
+            const subContainer = document.createElement('div');
+            Object.assign(subContainer.style, {
+                border: '1px solid #ccc', borderRadius: '8px', padding: '10px'
+            });
+
+            fetchMonthCalendar(year, month).then(data => {
+                const header = document.createElement('div');
+                header.textContent = `${monthNames[month]} ${year}`;
+                header.style.fontWeight = 'bold';
+                header.style.marginBottom = '8px';
+                subContainer.appendChild(header);
+
+                renderCalendarGrid(data, year, month, subContainer);
+            });
+
+            calendarWrapper.appendChild(subContainer);
+        }
+
+        calendarContainer.appendChild(calendarWrapper);
+    }
+
+    function renderCalendarGrid(data, year, month, targetElement = calendarContainer) {
+        const grid = document.createElement('div');
+        Object.assign(grid.style, {
+            display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '5px'
+        });
+
+        daysOfWeek.forEach(d => {
+            const dayCell = document.createElement('div');
+            dayCell.textContent = d;
+            dayCell.style.fontWeight = 'bold';
+            dayCell.style.color = '#555';
+            grid.appendChild(dayCell);
+        });
+
+        const daysStatus = {};
+        data.forEach(item => {
+            const date = parseDateToDay(item.DateLibere);
+            if (date.getMonth() === month && date.getFullYear() === year) {
+                const day = date.getDate();
+                daysStatus[day] = item.SlotLiberi > 0 ? 'available' : 'unavailable';
+            }
+        });
+
+        const firstDay = new Date(year, month, 1);
+        const totalDays = new Date(year, month + 1, 0).getDate();
+        const jsDay = firstDay.getDay();
+        const blankDays = (jsDay + 6) % 7;
+
+        for (let i = 0; i < blankDays; i++) grid.appendChild(document.createElement('div'));
+
+        for (let day = 1; day <= totalDays; day++) {
+            const cell = document.createElement('div');
+            cell.textContent = day;
+            Object.assign(cell.style, {
+                padding: '8px', borderRadius: '6px', fontWeight: 'bold',
+                textAlign: 'center', cursor: 'pointer'
+            });
+
+            if (daysStatus[day] === 'available') {
+                cell.style.backgroundColor = '#28a745';
+                cell.style.color = 'white';
+            } else if (daysStatus[day] === 'unavailable') {
+                cell.style.backgroundColor = '#dc3545';
+                cell.style.color = 'white';
+            } else {
+                cell.style.backgroundColor = '#e0e0e0';
+                cell.style.color = '#888';
+            }
+
+            cell.onclick = () => {
+                const dateISO = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                requestTimeSlots(dateISO, servizioInput.value.trim());
+            };
+
+            grid.appendChild(cell);
+        }
+
+        targetElement.appendChild(grid);
+    }
+
+    button.addEventListener('click', function () {
+        const dateObj = parseDateToDay(dateInput.value.trim());
+        currentMonth = dateObj.getMonth();
+        currentYear = dateObj.getFullYear();
+        renderThreeMonthCalendars(currentYear, currentMonth);
+        if (autoToggleCheckbox.checked) autoSearchAndBook();
+    });
+
+    if (autoToggleCheckbox.checked) autoSearchAndBook();
+})();
